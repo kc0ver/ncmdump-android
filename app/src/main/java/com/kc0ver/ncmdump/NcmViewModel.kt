@@ -229,10 +229,13 @@ class NcmViewModel(application: Application) : AndroidViewModel(application) {
     // ------------------------------------------------------------ 保存位置
 
     fun buildTarget(uri: Uri): OutputTarget {
-        val real = Storage.treeToRealDir(uri)?.takeIf { Storage.canWriteDir(it) }
+        // 这里刻意不做磁盘探测：它跑在选择器回调的主线程上。
+        // 真正能不能写交给 Converter 在 IO 线程上用 canWriteDir() 实测，
+        // 写不进去会自动退回 treeUri；没有全文件访问权限时直接只留 treeUri。
+        val real = Storage.treeToRealDir(uri)
+            ?.takeIf { _ui.value.allFilesAccess && it.isDirectory }
         return OutputTarget(
             realDir = real,
-            // 真实路径不可写时（比如没给全文件访问权限）就退回 SAF 目录树
             treeUri = uri,
             label = real?.absolutePath ?: Storage.treeLabel(uri),
         )
@@ -258,15 +261,28 @@ class NcmViewModel(application: Application) : AndroidViewModel(application) {
         _ui.update { it.copy(deleteSource = value) }
     }
 
-    /** 目标目录此刻是否真的能写（真实路径可写，或者有 SAF 目录树兜底） */
-    fun targetIsWritable(): Boolean {
+    /**
+     * 目标目录此刻是否可用。
+     *
+     * 刻意不做磁盘探测：这个方法会在点击「开始转换」的主线程上被调用。
+     * 真实路径只有在握有「所有文件访问权限」时才算数，否则靠 SAF 目录树兜底。
+     */
+    fun targetIsUsable(): Boolean {
+        val state = _ui.value
+        val target = state.target
+        val realUsable = state.allFilesAccess && target.realDir?.isDirectory == true
+        return realUsable || target.treeUri != null
+    }
+
+    /** 权威判定：真的去目标目录建个临时文件试试。只能在 IO 线程调用。 */
+    fun probeTargetWritable(): Boolean {
         val target = _ui.value.target
         val realWritable = target.realDir?.let { Storage.canWriteDir(it) } == true
         return realWritable || target.treeUri != null
     }
 
     /** 开始转换前是否必须先弹目录选择器 */
-    fun needsTargetPicker(): Boolean = _ui.value.askEveryTime || !targetIsWritable()
+    fun needsTargetPicker(): Boolean = _ui.value.askEveryTime || !targetIsUsable()
 
     // -------------------------------------------------------------- 转换
 
@@ -281,7 +297,7 @@ class NcmViewModel(application: Application) : AndroidViewModel(application) {
             postMessage("没有待转换的文件")
             return
         }
-        if (!targetIsWritable()) {
+        if (!targetIsUsable()) {
             postMessage("请先选择保存位置")
             return
         }
@@ -297,6 +313,12 @@ class NcmViewModel(application: Application) : AndroidViewModel(application) {
     private fun execute(target: OutputTarget) {
         cancelRequested = false
         viewModelScope.launch {
+            // 磁盘探测放到 IO 线程，别卡住点击「开始转换」的那一帧
+            val writable = withContext(Dispatchers.IO) { probeTargetWritable() }
+            if (!writable) {
+                postMessage("目标目录不可写，请重新选择保存位置")
+                return@launch
+            }
             _ui.update { it.copy(converting = true) }
             val queue = _ui.value.items.filter { it.status != ConvertStatus.SUCCESS }
             val deleteSource = _ui.value.deleteSource

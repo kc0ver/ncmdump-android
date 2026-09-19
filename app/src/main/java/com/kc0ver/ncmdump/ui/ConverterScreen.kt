@@ -1,18 +1,19 @@
 package com.kc0ver.ncmdump.ui
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,20 +25,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,11 +79,17 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.kc0ver.ncmdump.NcmViewModel
 import com.kc0ver.ncmdump.R
 import com.kc0ver.ncmdump.UiState
+import com.kc0ver.ncmdump.core.PickDirectoryContract
 import com.kc0ver.ncmdump.core.Storage
 import com.kc0ver.ncmdump.model.ConvertStatus
 import com.kc0ver.ncmdump.model.NcmItem
+import com.kc0ver.ncmdump.model.OutputTarget
 import com.kc0ver.ncmdump.ui.theme.StatColors
+import java.io.File
 import java.util.Locale
+
+/** 内置目录选择器这次是为什么打开的 */
+private enum class PickPurpose { ScanFolder, DefaultOutput, RunOutput }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,6 +98,12 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     var showSettings by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
+    var builtinPurpose by remember { mutableStateOf<PickPurpose?>(null) }
+
+    // 契约实例只建一次：rememberLauncherForActivityResult 内部按 (registry, key, contract)
+    // 做 DisposableEffect，contract 每次重组都换新实例会导致反复注销/注册。
+    val directoryContract = remember { PickDirectoryContract() }
 
     val pickFiles = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
@@ -100,18 +113,14 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
     // 用独立 launcher（而不是用 remember 状态记住「这次选目录是为了干嘛」）是有意为之：
     // 选择器在前台时本进程可能被系统回收，ActivityResultRegistry 能按 key 把结果恢复回来，
     // 但 remember 的状态会丢，导致回调里分不清意图、什么也不做。
-    val scanFolderLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
+    val scanFolderLauncher = rememberLauncherForActivityResult(directoryContract) { uri ->
         if (uri != null) {
             persistTreePermission(context, uri)
             viewModel.addTree(uri, Storage.treeLabel(uri))
         }
     }
 
-    val defaultDirLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
+    val defaultDirLauncher = rememberLauncherForActivityResult(directoryContract) { uri ->
         if (uri != null) {
             persistTreePermission(context, uri)
             val target = viewModel.buildTarget(uri)
@@ -120,9 +129,7 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
         }
     }
 
-    val runDirLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocumentTree(),
-    ) { uri ->
+    val runDirLauncher = rememberLauncherForActivityResult(directoryContract) { uri ->
         if (uri != null) {
             persistTreePermission(context, uri)
             viewModel.setTarget(
@@ -145,7 +152,7 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             allFilesLauncher.launch(viewModel.allFilesAccessIntent())
         } else {
-            legacyPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+            legacyPermissionLauncher.launch(android.Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
 
@@ -153,6 +160,22 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
         val message = state.message ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
         viewModel.consumeMessage()
+    }
+
+    /**
+     * 选目录：有「所有文件访问权限」时走应用内置的选择器（瞬时、无系统授权弹窗、
+     * 还能选系统 SAF 不允许授权的 Download 根目录）；否则只能交给 DocumentsUI。
+     */
+    val useSystemPicker: (PickPurpose) -> Unit = { purpose ->
+        when (purpose) {
+            PickPurpose.ScanFolder -> scanFolderLauncher.launch(null)
+            PickPurpose.DefaultOutput -> defaultDirLauncher.launch(state.target.treeUri)
+            PickPurpose.RunOutput -> runDirLauncher.launch(state.target.treeUri)
+        }
+    }
+
+    val chooseFolder: (PickPurpose) -> Unit = { purpose ->
+        if (state.allFilesAccess) builtinPurpose = purpose else useSystemPicker(purpose)
     }
 
     Scaffold(
@@ -165,6 +188,14 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
                     )
                 },
                 actions = {
+                    if (state.items.isNotEmpty()) {
+                        IconButton(
+                            onClick = { showClearDialog = true },
+                            enabled = !state.converting,
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "清空列表")
+                        }
+                    }
                     IconButton(onClick = { showSettings = true }) {
                         Icon(Icons.Default.Settings, contentDescription = "设置")
                     }
@@ -183,7 +214,7 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
                     if (state.items.none { it.status != ConvertStatus.SUCCESS }) {
                         viewModel.postMessage("先添加一些 .ncm 文件吧")
                     } else if (viewModel.needsTargetPicker()) {
-                        runDirLauncher.launch(state.target.treeUri)
+                        chooseFolder(PickPurpose.RunOutput)
                     } else {
                         viewModel.startConversion()
                     }
@@ -207,19 +238,19 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
 
             OutputRow(
                 state = state,
-                onPick = { defaultDirLauncher.launch(state.target.treeUri) },
+                onPick = { chooseFolder(PickPurpose.DefaultOutput) },
                 onClear = viewModel::clearDefaultTarget,
             )
 
             QuickActions(
                 state = state,
                 onPickFiles = { pickFiles.launch(arrayOf("*/*")) },
-                onScanFolder = { scanFolderLauncher.launch(null) },
+                onScanFolder = { chooseFolder(PickPurpose.ScanFolder) },
                 onScanNetease = viewModel::scanNetease,
                 onDeepScan = {
                     if (!viewModel.requireAllFilesAccess()) viewModel.deepScan()
                 },
-                onClear = viewModel::clearAll,
+                onClear = { showClearDialog = true },
                 onRetry = viewModel::retryFailed,
             )
 
@@ -252,13 +283,75 @@ fun ConverterScreen(viewModel: NcmViewModel = viewModel()) {
         }
     }
 
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null) },
+            title = { Text("清空列表？") },
+            text = {
+                Text(
+                    "将移除列表中的 ${state.items.size} 个文件，三个计数也会一起归零，" +
+                        "方便你换一批 ncm 继续转换。手机上的 .ncm 文件不会被删除。",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDialog = false
+                        viewModel.clearAll()
+                    },
+                ) { Text("清空") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) { Text("取消") }
+            },
+        )
+    }
+
+    builtinPurpose?.let { purpose ->
+        DirectoryPickerSheet(
+            title = when (purpose) {
+                PickPurpose.ScanFolder -> "选择要扫描的文件夹"
+                PickPurpose.DefaultOutput -> "选择默认保存位置"
+                PickPurpose.RunOutput -> "选择保存位置"
+            },
+            startDir = state.target.realDir?.takeIf { it.isDirectory }
+                ?: Environment.getExternalStorageDirectory(),
+            onDismiss = { builtinPurpose = null },
+            onUseSystemPicker = {
+                builtinPurpose = null
+                useSystemPicker(purpose)
+            },
+            onPick = { dir ->
+                builtinPurpose = null
+                val target = OutputTarget(dir, null, dir.absolutePath)
+                when (purpose) {
+                    PickPurpose.ScanFolder -> viewModel.addRealPath(dir, dir.absolutePath)
+
+                    PickPurpose.DefaultOutput -> {
+                        viewModel.setTarget(target, rememberAsDefault = true)
+                        viewModel.postMessage("默认保存位置：${dir.absolutePath}")
+                    }
+
+                    PickPurpose.RunOutput -> {
+                        viewModel.setTarget(target, rememberAsDefault = false)
+                        viewModel.startConversion()
+                    }
+                }
+            },
+        )
+    }
+
     if (showSettings) {
         SettingsSheet(
             state = state,
             onDismiss = { showSettings = false },
             onAskEveryTimeChange = viewModel::setAskEveryTime,
             onDeleteSourceChange = viewModel::setDeleteSource,
-            onPickDefaultDir = { defaultDirLauncher.launch(state.target.treeUri) },
+            onPickDefaultDir = {
+                showSettings = false
+                chooseFolder(PickPurpose.DefaultOutput)
+            },
             onClearDefaultDir = viewModel::clearDefaultTarget,
             onRequestAllFilesAccess = requestAllFilesAccess,
         )
@@ -306,7 +399,7 @@ private fun StatsHeader(state: UiState) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 0.dp)
+                    .padding(horizontal = 16.dp)
                     .padding(bottom = 8.dp),
             )
         }
@@ -375,6 +468,7 @@ private fun OutputRow(
 
 // ------------------------------------------------------------------ 快捷操作
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuickActions(
     state: UiState,
@@ -386,13 +480,14 @@ private fun QuickActions(
     onRetry: () -> Unit,
 ) {
     val enabled = !state.converting && !state.scanning
-    Row(
+    // 用 FlowRow 让 chip 自动换行：之前是横向滚动，窄屏时「清空列表」被挤到屏幕外，
+    // 用户根本看不到这个按钮。
+    FlowRow(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         AssistChip(
             onClick = onPickFiles,
@@ -523,7 +618,6 @@ private fun StatusIcon(status: ConvertStatus) {
     }
 }
 
-@Composable
 private fun statusLabel(item: NcmItem): String = when (item.status) {
     ConvertStatus.PENDING -> "等待转换"
     ConvertStatus.RUNNING -> "转换中…"
@@ -550,7 +644,7 @@ private fun EmptyState(onPickFiles: () -> Unit, onScanNetease: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            imageVector = Icons.Default.List,
+            imageVector = Icons.AutoMirrored.Filled.List,
             contentDescription = null,
             modifier = Modifier.size(56.dp),
             tint = MaterialTheme.colorScheme.outlineVariant,
