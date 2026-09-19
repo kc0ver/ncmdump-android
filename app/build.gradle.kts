@@ -26,8 +26,8 @@ android {
         applicationId = "com.kc0ver.ncmdump"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         // 只打包 native/build.sh 实际编译出的 ABI
         ndk {
@@ -36,12 +36,24 @@ android {
     }
 
     signingConfigs {
+        // 三种签名方案全开。AGP 在 minSdk >= 24 时默认只签 v2，结果 APK 里
+        // 没有 META-INF/*.SF，jarsigner 会报「no manifest」，一堆检测工具
+        // （包括某些文件管理器和第三方「APK 签名检测」）会判定为「未签名」。
+        // v1 对 minSdk 26 来说技术上不是必需，但加上它兼容性最好、也省得被误判。
+        getByName("debug") {
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
@@ -78,6 +90,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

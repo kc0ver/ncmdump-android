@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.kc0ver.ncmdump.BuildConfig
 import com.kc0ver.ncmdump.UiState
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -127,7 +128,7 @@ fun SettingsSheet(
                 Text("关于", style = MaterialTheme.typography.titleSmall)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "NCM 转换器 1.0.0",
+                    text = "NCM 转换器 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

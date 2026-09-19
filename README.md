@@ -120,6 +120,20 @@ keytool -genkeypair \
 然后 `./gradlew :app:assembleRelease`。R8 混淆 + 资源压缩后 APK 约 **2.4 MB**
 （debug 版是 12.6 MB），原生 ncmdump 二进制在 `jniLibs` 里不受 R8 影响。
 
+构建脚本里显式打开了 **v1 + v2 + v3 三种签名方案**。AGP 在 `minSdk >= 24` 时默认
+只签 v2，产物里没有 `META-INF/*.SF`，`jarsigner -verify` 会报 `no manifest`，
+不少「APK 签名检测」工具因此把它判成「未签名」。对 minSdk 26 来说 v1 技术上不是必需，
+但加上它兼容性最好，也省得被误判。校验：
+
+```bash
+apksigner verify --min-sdk-version 21 -v app-release.apk   # v1/v2/v3 都应为 true
+apksigner verify --print-certs app-release.apk             # 确认 DN 是自己的，不是 Android Debug
+jarsigner -verify app-release.apk                          # 应输出 jar verified.
+```
+
+> 注意别把 `app-debug.apk` 当成发布包：它由 `~/.android/debug.keystore` 签名，
+> 证书是 `C=US, O=Android, CN=Android Debug`。
+
 > ⚠️ **keystore 必须备份**（密码管理器 / 网盘）。同一个包名的应用只能用同一把密钥签名，
 > 密钥丢了就再也无法给已安装的用户推送更新 —— 除非你使用 Google Play App Signing 托管。
 
