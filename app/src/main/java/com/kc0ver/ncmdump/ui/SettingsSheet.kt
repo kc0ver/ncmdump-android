@@ -1,5 +1,6 @@
 package com.kc0ver.ncmdump.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +21,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -146,10 +148,23 @@ fun SettingsSheet(
                         MaterialTheme.colorScheme.error
                     },
                 )
+                LinkRow(
+                    label = "项目地址",
+                    value = "github.com/kc0ver/ncmdump-android",
+                    url = "https://github.com/kc0ver/ncmdump-android",
+                )
+                LinkRow(
+                    label = "灵感来源",
+                    value = "lilyco-42/ncmdump-android",
+                    url = "https://github.com/lilyco-42/ncmdump-android",
+                )
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "项目地址：github.com/kc0ver/ncmdump-android",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = "本项目的开发灵感来自 lilyco-42/ncmdump-android —— 它同样选择用 Android NDK " +
+                        "复用上游 C++ 代码，而不是用 Kotlin 重写解密逻辑。原生二进制的打包方式、" +
+                        "批量转换与自动定位音乐目录等思路都受它启发，特此致谢。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
                 )
             }
         }
@@ -173,4 +188,28 @@ private fun SwitchRow(
         },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
     )
+}
+
+/** 「标签：可点击链接」一行，点了用系统浏览器打开 */
+@Composable
+private fun LinkRow(label: String, value: String, url: String) {
+    val uriHandler = LocalUriHandler.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { runCatching { uriHandler.openUri(url) } }
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "$label：",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
 }

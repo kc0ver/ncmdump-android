@@ -8,6 +8,10 @@
 > 转换内核是上游 ncmdump 的原始 C++ 源码，一行未改，用 Android NDK 交叉编译成可执行文件。
 > 本项目只负责「找文件 → 调命令行 → 报结果」这一层前端逻辑。
 
+**本项目的开发灵感来自 [lilyco-42/ncmdump-android](https://github.com/lilyco-42/ncmdump-android)** ——
+它同样选择用 Android NDK 复用上游 C++ 代码，而不是用 Kotlin 重写解密逻辑。原生二进制的打包方式、
+批量转换、自动定位音乐目录等思路都受它启发，特此致谢。两者的区别见文末「与 lilyco-42 版本的差异」。
+
 ---
 
 ## 功能
@@ -19,6 +23,9 @@
 - **扫描本地 ncm**：通过 SAF 选择任意文件夹递归扫描，或开启「所有文件访问权限」后全盘深度扫描
 - **转换后删除源文件**：可选开关
 - **随时取消**：转换过程中点悬浮按钮即可中断当前进程
+- **一键清空列表**：顶部栏垃圾桶图标（或「清空列表」chip），带二次确认，清空后三个计数归零，方便换一批 ncm 继续转
+- **内置目录选择器**：拿到「所有文件访问权限」后选目录不再启动系统的 DocumentsUI，
+  瞬间打开、没有系统授权确认框，而且能选系统 SAF 不允许授权的 `Download` 根目录
 
 ## 截图
 
@@ -87,6 +94,37 @@ cd ncmdump-android
 `native/build.sh` 支持这些环境变量：`ANDROID_HOME` / `ANDROID_NDK_HOME`、`ANDROID_API`（默认 26）、
 `CMAKE_BIN`、`NINJA_BIN`。
 
+### release 签名
+
+release 构建的签名信息从**仓库根目录之外**的 `keystore.properties` 读取，该文件与 `.jks`
+都在 `.gitignore` 里，私钥不会进版本库：
+
+```properties
+# keystore.properties（gitignore 掉，不要提交）
+storeFile=/absolute/path/to/ncmdump-release.jks
+storePassword=********
+keyAlias=ncmdump
+keyPassword=********
+```
+
+生成自己的 keystore：
+
+```bash
+keytool -genkeypair \
+  -keystore ~/keystores/ncmdump-release.jks \
+  -storetype PKCS12 -alias ncmdump \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -dname "CN=你的名字, O=你的组织, C=CN"
+```
+
+然后 `./gradlew :app:assembleRelease`。R8 混淆 + 资源压缩后 APK 约 **2.4 MB**
+（debug 版是 12.6 MB），原生 ncmdump 二进制在 `jniLibs` 里不受 R8 影响。
+
+> ⚠️ **keystore 必须备份**（密码管理器 / 网盘）。同一个包名的应用只能用同一把密钥签名，
+> 密钥丢了就再也无法给已安装的用户推送更新 —— 除非你使用 Google Play App Signing 托管。
+
+没有 `keystore.properties` 时 release 仍可构建，只是产物未签名。
+
 ## 目录结构
 
 ```
@@ -119,6 +157,11 @@ third_party/
 - 「自动识别网易云目录」依赖目录名启发式匹配；如果网易云改了目录结构，请用「扫描文件夹」手动指定。
 - 全盘「深度扫描」受 20 秒 / 2000 个文件 / 8 层深度的预算限制，超大存储卡可能扫不全。
 - 「所有文件访问权限」会导致应用无法上架 Google Play（需要额外提交用途声明）。
+- **系统目录选择器的打开速度不受本应用控制**：`DocumentsUI` 的 `PickActivity` 在
+  Android 16 x86_64 模拟器上实测 START → 首帧冷启动约 **1.41 s**、热启动约 **0.68 s**，
+  而应用从点击到 `startActivity` 只花不到 0.1 s。既然快不了，就①尽量不打开它
+  （有权限时走内置选择器）②打开时加 `EXTRA_LOCAL_ONLY` 跳过云端 provider 的查询
+  ③带上 `EXTRA_INITIAL_URI` 直接落在上次用过的目录。
 
 ## 许可证
 
@@ -129,6 +172,26 @@ third_party/
 - [taurusxin/ncmdump](https://github.com/taurusxin/ncmdump) — MIT
 - [taglib/taglib](https://github.com/taglib/taglib) — LGPL-2.1 / MPL-1.1 双许可，本项目按 **MPL-1.1** 静态链接
 - zlib — 随 Android NDK sysroot 提供
+
+## 致谢
+
+- [taurusxin/ncmdump](https://github.com/taurusxin/ncmdump) —— 转换内核，全部解密工作由它完成（MIT）。
+- [lilyco-42/ncmdump-android](https://github.com/lilyco-42/ncmdump-android) —— **本项目的灵感来源**。
+  它把「用 Android NDK 直接复用上游 C++ 代码」这条路走通了，本项目沿着同样的思路重做了一遍，
+  在此致谢。
+- [taglib/taglib](https://github.com/taglib/taglib) —— 写入 FLAC/MP3 标签与封面。
+
+## 与 lilyco-42 版本的差异
+
+两者都把上游 C++ 编成原生二进制，区别主要在前端与存储策略：
+
+| | 本项目 | lilyco-42/ncmdump-android |
+| --- | --- | --- |
+| 输入方式 | 系统文件选择器 / SAF 目录树 / 网易云目录自动识别 / 全盘深度扫描 | 批量选择文件 |
+| 保存位置 | 用户指定；未设默认目录时每次询问 | 固定 `Music/ncmdump/` |
+| 存储权限 | SAF 与「所有文件访问权限」两条路都支持，无权限也能用 | 见其文档 |
+| 封面图 | 由 TagLib 内嵌进音频文件 | 另存为独立图片文件 |
+| 界面语言 | 简体中文 | 中 / 英可切换，支持自定义翻译包 |
 
 ## 免责声明
 
