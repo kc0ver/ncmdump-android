@@ -32,29 +32,6 @@
 
 ## 技术方案
 
-### 为什么是「原生可执行文件」而不是 Kotlin 重写
-
-`ncmdump` 是 C++17 项目（CMake + TagLib + zlib），不是 Rust，所以不存在「cargo 交叉编译」这条路。
-可选的方案有三种：
-
-| 方案 | 说明 |
-| --- | --- |
-| **A. NDK 交叉编译上游源码为可执行文件**（本项目采用） | 真正的「调用 ncmdump 命令行」，与上游行为零偏差；只需一份 `native/build.sh` |
-| B. Kotlin 重写解密逻辑 | 不需要 NDK、APK 更小，但 NCM 解密 + FLAC/MP3 标签写入全要自己实现，容易出细节 bug |
-| C. NDK 编译成 JNI 共享库 | 最稳，但要把 CLI 改造成库接口，不再是「命令行」 |
-
-选 A。
-
-### 怎么在 Android 10+ 上执行自带二进制
-
-Android 10 起禁止应用 `exec()` 自己私有目录里的文件（W^X 策略）。
-但 **`applicationInfo.nativeLibraryDir` 是豁免的**，于是：
-
-1. 编译产物命名为 `libncmdump.so`（必须以 `lib` 开头、`.so` 结尾，Android 才会当作 native library）；
-2. 放进 `app/src/main/jniLibs/<abi>/`；
-3. `packaging { jniLibs { useLegacyPackaging = true } }` 强制把库解压到磁盘（而不是留在 APK 里 mmap）；
-4. 运行时用 `ProcessBuilder("$nativeLibraryDir/libncmdump.so", …)` 直接执行。
-
 ### 输入输出路径怎么来
 
 原生程序只认真实路径，而 Android 的存储模型有两套，所以应用同时支持：
@@ -128,12 +105,6 @@ apksigner verify --min-sdk-version 21 -v app-release.apk   # v1/v2/v3 都应为 
 apksigner verify --print-certs app-release.apk             # 确认 DN 是自己的，不是 Android Debug
 jarsigner -verify app-release.apk                          # 应输出 jar verified.
 ```
-
-> 注意别把 `app-debug.apk` 当成发布包：它由 `~/.android/debug.keystore` 签名，
-> 证书是 `C=US, O=Android, CN=Android Debug`。
-
-> ⚠️ **keystore 必须备份**（密码管理器 / 网盘）。同一个包名的应用只能用同一把密钥签名，
-> 密钥丢了就再也无法给已安装的用户推送更新 —— 除非你使用 Google Play App Signing 托管。
 
 没有 `keystore.properties` 时 release 仍可构建，只是产物未签名。
 
