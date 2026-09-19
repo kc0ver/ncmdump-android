@@ -12,8 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -468,7 +468,6 @@ private fun OutputRow(
 
 // ------------------------------------------------------------------ 快捷操作
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun QuickActions(
     state: UiState,
@@ -480,15 +479,24 @@ private fun QuickActions(
     onRetry: () -> Unit,
 ) {
     val enabled = !state.converting && !state.scanning
-    // 用 FlowRow 让 chip 自动换行：之前是横向滚动，窄屏时「清空列表」被挤到屏幕外，
-    // 用户根本看不到这个按钮。
-    FlowRow(
+    // 横向滑动的一行 chip。「清空列表」固定排在最前面：放在末尾时它会被挤出屏幕，
+    // 用户得先滑动才能发现。
+    Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (state.items.isNotEmpty()) {
+            AssistChip(
+                onClick = onClear,
+                enabled = enabled,
+                label = { Text("清空列表") },
+                leadingIcon = { Icon(Icons.Default.Delete, null, Modifier.size(18.dp)) },
+            )
+        }
         AssistChip(
             onClick = onPickFiles,
             enabled = enabled,
@@ -519,14 +527,6 @@ private fun QuickActions(
                 enabled = enabled,
                 label = { Text("重试失败") },
                 leadingIcon = { Icon(Icons.Default.Refresh, null, Modifier.size(18.dp)) },
-            )
-        }
-        if (state.items.isNotEmpty()) {
-            AssistChip(
-                onClick = onClear,
-                enabled = enabled,
-                label = { Text("清空列表") },
-                leadingIcon = { Icon(Icons.Default.Delete, null, Modifier.size(18.dp)) },
             )
         }
     }
