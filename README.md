@@ -8,9 +8,7 @@
 > 转换内核是上游 ncmdump 的原始 C++ 源码，一行未改，用 Android NDK 交叉编译成可执行文件。
 > 本项目只负责「找文件 → 调命令行 → 报结果」这一层前端逻辑。
 
-**本项目的开发灵感来自 [lilyco-42/ncmdump-android](https://github.com/lilyco-42/ncmdump-android)** ——
-它同样选择用 Android NDK 复用上游 C++ 代码，而不是用 Kotlin 重写解密逻辑。原生二进制的打包方式、
-批量转换、自动定位音乐目录等思路都受它启发，特此致谢。两者的区别见文末「与 lilyco-42 版本的差异」。
+本项目的开发灵感来自 [lilyco-42/ncmdump-android](https://github.com/lilyco-42/ncmdump-android)。
 
 ---
 
@@ -190,22 +188,8 @@ third_party/
 ## 致谢
 
 - [taurusxin/ncmdump](https://github.com/taurusxin/ncmdump) —— 转换内核，全部解密工作由它完成（MIT）。
-- [lilyco-42/ncmdump-android](https://github.com/lilyco-42/ncmdump-android) —— **本项目的灵感来源**。
-  它把「用 Android NDK 直接复用上游 C++ 代码」这条路走通了，本项目沿着同样的思路重做了一遍，
-  在此致谢。
+- [lilyco-42/ncmdump-android](https://github.com/lilyco-42/ncmdump-android) —— 本项目的灵感来源。
 - [taglib/taglib](https://github.com/taglib/taglib) —— 写入 FLAC/MP3 标签与封面。
-
-## 与 lilyco-42 版本的差异
-
-两者都把上游 C++ 编成原生二进制，区别主要在前端与存储策略：
-
-| | 本项目 | lilyco-42/ncmdump-android |
-| --- | --- | --- |
-| 输入方式 | 系统文件选择器 / SAF 目录树 / 网易云目录自动识别 / 全盘深度扫描 | 批量选择文件 |
-| 保存位置 | 用户指定；未设默认目录时每次询问 | 固定 `Music/ncmdump/` |
-| 存储权限 | SAF 与「所有文件访问权限」两条路都支持，无权限也能用 | 见其文档 |
-| 封面图 | 由 TagLib 内嵌进音频文件 | 另存为独立图片文件 |
-| 界面语言 | 简体中文 | 中 / 英可切换，支持自定义翻译包 |
 
 ## 免责声明
 

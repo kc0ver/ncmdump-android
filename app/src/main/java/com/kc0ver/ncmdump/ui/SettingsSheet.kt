@@ -159,14 +159,6 @@ fun SettingsSheet(
                     value = "lilyco-42/ncmdump-android",
                     url = "https://github.com/lilyco-42/ncmdump-android",
                 )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "本项目的开发灵感来自 lilyco-42/ncmdump-android —— 它同样选择用 Android NDK " +
-                        "复用上游 C++ 代码，而不是用 Kotlin 重写解密逻辑。原生二进制的打包方式、" +
-                        "批量转换与自动定位音乐目录等思路都受它启发，特此致谢。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
             }
         }
     }
