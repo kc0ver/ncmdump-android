@@ -1,0 +1,24 @@
+# Android Studio / Gradle 本地配置
+local.properties
+
+# Gradle
+.gradle/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 原生编译中间产物（jniLibs 下的二进制是要提交的）
+native/build/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# 日志 / 临时文件
+*.log
+*.hprof
+
+# 本地构建出来的 APK（发布走 GitHub Release / Actions 产物）
+*.apk
