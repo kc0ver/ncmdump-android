@@ -1,10 +1,22 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
 }
+
+// release 签名信息从仓库外的 keystore.properties 读取。
+// 这个文件和 .jks 都在 .gitignore 里 —— 私钥永远不进版本库。
+// 没有这个文件时 release 仍可构建，只是产物未签名（assembleRelease 会生成 *-unsigned.apk）。
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseSigning = keystoreProperties.getProperty("storeFile") != null
 
 android {
     namespace = "com.kc0ver.ncmdump"
@@ -23,16 +35,33 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false
+            // 原生 ncmdump 二进制在 jniLibs 里，不受 R8 影响；
+            // Kotlin/Compose 部分没有反射，可以放心开混淆和资源压缩。
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
